@@ -1,0 +1,233 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>AgroVision Live</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+</head>
+<body class="bg-slate-900 text-white min-h-screen p-6">
+    <div class="mx-auto grid max-w-7xl grid-cols-1 gap-6 lg:grid-cols-[minmax(0,1.4fr)_minmax(360px,0.9fr)]">
+        <section class="rounded-2xl border border-slate-700 bg-slate-800 p-4 shadow-xl">
+            <h1 class="mb-4 text-2xl font-bold text-green-400">Monitoramento em Tempo Real</h1>
+            <div class="mb-4 rounded-xl border border-slate-600 bg-slate-900 p-4">
+                <div class="flex items-center justify-between gap-3">
+                    <div>
+                        <p class="text-xs uppercase tracking-wide text-slate-400">Monitoramento de pessoa</p>
+                        <p id="visibility-status" class="text-lg font-semibold text-white">Aguardando analise</p>
+                    </div>
+                    <span id="visibility-badge" class="rounded-full bg-slate-700 px-3 py-1 text-xs font-semibold uppercase text-slate-100">
+                        --
+                    </span>
+                </div>
+                <p id="visibility-details" class="mt-2 text-sm text-slate-300">A camera ainda nao foi analisada.</p>
+                <p id="visibility-updated" class="mt-2 text-xs text-slate-500">Sem atualizacao ainda.</p>
+            </div>
+            <img src="/video_feed" alt="Camera ao vivo" class="w-full rounded-xl border border-slate-600 bg-black">
+        </section>
+
+        <section class="flex min-h-[620px] flex-col rounded-2xl border border-slate-700 bg-slate-800 p-4 shadow-xl">
+            <h2 class="mb-4 text-2xl font-bold text-cyan-400">Assistente AgroVision</h2>
+            <div id="chat" class="flex-1 space-y-3 overflow-y-auto rounded-xl bg-slate-950 p-4"></div>
+            <div class="mt-4 space-y-3">
+                <textarea
+                    id="msg"
+                    rows="3"
+                    class="w-full rounded-xl border border-slate-600 bg-slate-900 p-3 outline-none"
+                    placeholder="Pergunte sobre o ultimo evento detectado ou continue a conversa."
+                ></textarea>
+                <div class="flex items-center justify-between gap-3">
+                    <p id="status" class="text-sm text-slate-300">Pronto para consultar o modelo local.</p>
+                    <button
+                        id="send-button"
+                        onclick="sendQuestion()"
+                        class="rounded-xl bg-cyan-600 px-5 py-2 font-semibold text-white transition hover:bg-cyan-500 disabled:cursor-not-allowed disabled:bg-slate-600"
+                    >
+                        Enviar
+                    </button>
+                </div>
+            </div>
+        </section>
+    </div>
+
+    <script>
+        const initialHistory = {{ initial_history | tojson }};
+        const chatBox = document.getElementById("chat");
+        const input = document.getElementById("msg");
+        const statusBox = document.getElementById("status");
+        const sendButton = document.getElementById("send-button");
+        const visibilityStatus = document.getElementById("visibility-status");
+        const visibilityDetails = document.getElementById("visibility-details");
+        const visibilityUpdated = document.getElementById("visibility-updated");
+        const visibilityBadge = document.getElementById("visibility-badge");
+        let chatHistory = Array.isArray(initialHistory) ? initialHistory : [];
+
+        function updateVisibilityBadge(status) {
+            visibilityBadge.className = "rounded-full px-3 py-1 text-xs font-semibold uppercase";
+
+            if (status === "pessoa detectada") {
+                visibilityBadge.classList.add("bg-emerald-600", "text-white");
+                return;
+            }
+
+            if (status === "sem pessoa") {
+                visibilityBadge.classList.add("bg-amber-500", "text-slate-950");
+                return;
+            }
+
+            visibilityBadge.classList.add("bg-slate-700", "text-slate-100");
+        }
+
+        async function refreshVisibility() {
+            try {
+                const response = await fetch("/visibility");
+                if (!response.ok) {
+                    throw new Error("Falha ao consultar visibilidade.");
+                }
+
+                const data = await response.json();
+                const status = data.status || "indisponivel";
+                visibilityStatus.textContent = status;
+                visibilityBadge.textContent = status;
+                visibilityDetails.textContent = data.details || "Sem detalhes.";
+                visibilityUpdated.textContent = data.updated_at
+                    ? `Atualizado as ${data.updated_at}`
+                    : "Sem atualizacao ainda.";
+                updateVisibilityBadge(status);
+            } catch (error) {
+                visibilityStatus.textContent = "Monitoramento indisponivel";
+                visibilityBadge.textContent = "erro";
+                visibilityDetails.textContent = "Nao foi possivel consultar a analise atual.";
+                visibilityUpdated.textContent = "Sem atualizacao.";
+                updateVisibilityBadge("indisponivel");
+            }
+        }
+
+        function escapeHtml(text) {
+            return text
+                .replaceAll("&", "&amp;")
+                .replaceAll("<", "&lt;")
+                .replaceAll(">", "&gt;")
+                .replaceAll('"', "&quot;")
+                .replaceAll("'", "&#39;");
+        }
+
+        function renderHistory() {
+            if (chatHistory.length === 0) {
+                chatBox.innerHTML = '<p class="text-sm text-slate-400">A conversa aparecera aqui.</p>';
+                return;
+            }
+
+            chatBox.innerHTML = chatHistory
+                .map((message) => {
+                    const isUser = message.role === "user";
+                    const wrapperClass = isUser ? "justify-end" : "justify-start";
+                    const bubbleClass = isUser
+                        ? "bg-cyan-600 text-white"
+                        : "bg-slate-800 text-slate-100 border border-slate-700";
+                    const label = isUser ? "Voce" : "IA";
+
+                    return `
+                        <div class="flex ${wrapperClass}">
+                            <div class="max-w-[85%] rounded-2xl px-4 py-3 ${bubbleClass}">
+                                <p class="mb-1 text-xs font-semibold uppercase tracking-wide text-slate-200">${label}</p>
+                                <p class="whitespace-pre-wrap break-words text-sm leading-6">${escapeHtml(message.content)}</p>
+                            </div>
+                        </div>
+                    `;
+                })
+                .join("");
+
+            chatBox.scrollTop = chatBox.scrollHeight;
+        }
+
+        async function sendQuestion() {
+            const message = input.value.trim();
+            if (!message) {
+                return;
+            }
+
+            sendButton.disabled = true;
+            statusBox.textContent = "Consultando o modelo local...";
+
+            chatHistory.push({ role: "user", content: message });
+            renderHistory();
+            input.value = "";
+
+            const assistantMessage = { role: "assistant", content: "" };
+            chatHistory.push(assistantMessage);
+            renderHistory();
+
+            try {
+                const response = await fetch("/chat/stream", {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({
+                        message,
+                        history: chatHistory.slice(0, -2)
+                    })
+                });
+
+                if (!response.ok || !response.body) {
+                    throw new Error("Nao foi possivel iniciar o streaming.");
+                }
+
+                const reader = response.body.getReader();
+                const decoder = new TextDecoder();
+                let buffer = "";
+
+                while (true) {
+                    const { value, done } = await reader.read();
+                    if (done) {
+                        break;
+                    }
+
+                    buffer += decoder.decode(value, { stream: true });
+                    const lines = buffer.split("\n");
+                    buffer = lines.pop() || "";
+
+                    for (const line of lines) {
+                        if (!line.trim()) {
+                            continue;
+                        }
+
+                        const data = JSON.parse(line);
+
+                        if (data.type === "chunk") {
+                            assistantMessage.content += data.content;
+                            renderHistory();
+                        }
+
+                        if (data.type === "done" && Array.isArray(data.history)) {
+                            chatHistory = data.history;
+                            renderHistory();
+                            statusBox.textContent = "Resposta concluida.";
+                        }
+
+                        if (data.type === "error") {
+                            throw new Error(data.error || "Falha ao processar a resposta.");
+                        }
+                    }
+                }
+            } catch (error) {
+                assistantMessage.content = "Ollama nao respondeu. Verifique se o servico e o modelo estao ativos.";
+                renderHistory();
+                statusBox.textContent = "Falha ao consultar o modelo local.";
+            } finally {
+                sendButton.disabled = false;
+            }
+        }
+
+        input.addEventListener("keydown", (event) => {
+            if (event.key === "Enter" && !event.shiftKey) {
+                event.preventDefault();
+                sendQuestion();
+            }
+        });
+
+        renderHistory();
+        refreshVisibility();
+        setInterval(refreshVisibility, 3000);
+    </script>
+</body>
+</html>
