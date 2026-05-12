@@ -15,6 +15,8 @@ from fastapi.templating import Jinja2Templates
 from pydantic import BaseModel, Field
 from ultralytics import YOLO
 
+from services.scraping import scrape_agro_news
+
 
 app = FastAPI()
 app.mount("/static", StaticFiles(directory="static"), name="static")
@@ -306,6 +308,11 @@ async def video_feed():
 async def get_visibility():
     with visibility_lock:
         return dict(visibility_state)
+
+
+@app.get("/agro-news")
+async def get_agro_news():
+    return scrape_agro_news()
 
 
 @app.post("/chat", response_model=ChatResponse)

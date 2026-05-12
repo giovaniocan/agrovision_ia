@@ -23,6 +23,21 @@
                 <p id="visibility-details" class="mt-2 text-sm text-slate-300">A camera ainda nao foi analisada.</p>
                 <p id="visibility-updated" class="mt-2 text-xs text-slate-500">Sem atualizacao ainda.</p>
             </div>
+            <div class="mb-4 rounded-xl border border-slate-600 bg-slate-900 p-4">
+                <div class="mb-3 flex items-center justify-between gap-3">
+                    <div>
+                        <p class="text-xs uppercase tracking-wide text-slate-400">Noticias do agro</p>
+                        <p class="text-lg font-semibold text-white">Contexto externo</p>
+                    </div>
+                    <span id="agro-news-cache" class="rounded-full bg-slate-700 px-3 py-1 text-xs font-semibold uppercase text-slate-100">
+                        --
+                    </span>
+                </div>
+                <div id="agro-news-list" class="space-y-2">
+                    <p class="text-sm text-slate-400">Carregando noticias...</p>
+                </div>
+                <p id="agro-news-status" class="mt-3 text-xs text-slate-500">Fonte publica: G1 Agronegocios RSS.</p>
+            </div>
             <img src="/video_feed" alt="Camera ao vivo" class="w-full rounded-xl border border-slate-600 bg-black">
         </section>
 
@@ -60,6 +75,9 @@
         const visibilityDetails = document.getElementById("visibility-details");
         const visibilityUpdated = document.getElementById("visibility-updated");
         const visibilityBadge = document.getElementById("visibility-badge");
+        const agroNewsList = document.getElementById("agro-news-list");
+        const agroNewsStatus = document.getElementById("agro-news-status");
+        const agroNewsCache = document.getElementById("agro-news-cache");
         let chatHistory = Array.isArray(initialHistory) ? initialHistory : [];
 
         function updateVisibilityBadge(status) {
@@ -100,6 +118,50 @@
                 visibilityDetails.textContent = "Nao foi possivel consultar a analise atual.";
                 visibilityUpdated.textContent = "Sem atualizacao.";
                 updateVisibilityBadge("indisponivel");
+            }
+        }
+
+        async function refreshAgroNews() {
+            try {
+                const response = await fetch("/agro-news");
+                if (!response.ok) {
+                    throw new Error("Falha ao consultar noticias.");
+                }
+
+                const data = await response.json();
+                const items = Array.isArray(data.items) ? data.items : [];
+                agroNewsCache.textContent = data.from_cache ? "cache" : "novo";
+                agroNewsCache.className = data.from_cache
+                    ? "rounded-full bg-amber-500 px-3 py-1 text-xs font-semibold uppercase text-slate-950"
+                    : "rounded-full bg-emerald-600 px-3 py-1 text-xs font-semibold uppercase text-white";
+
+                if (items.length === 0) {
+                    agroNewsList.innerHTML = '<p class="text-sm text-slate-400">Nenhuma noticia encontrada agora.</p>';
+                } else {
+                    agroNewsList.innerHTML = items
+                        .map((item) => {
+                            const title = escapeHtml(item.title || "Sem titulo");
+                            const link = escapeHtml(item.link || "#");
+                            const summary = escapeHtml(item.summary || "Sem resumo disponivel.");
+
+                            return `
+                                <a href="${link}" target="_blank" rel="noopener noreferrer" class="block rounded-lg border border-slate-700 bg-slate-950 p-3 transition hover:border-green-500">
+                                    <p class="text-sm font-semibold leading-5 text-green-300">${title}</p>
+                                    <p class="mt-1 line-clamp-2 text-xs leading-5 text-slate-400">${summary}</p>
+                                </a>
+                            `;
+                        })
+                        .join("");
+                }
+
+                agroNewsStatus.textContent = data.error
+                    ? data.error
+                    : `Atualizado em ${data.collected_at || "horario indisponivel"}.`;
+            } catch (error) {
+                agroNewsCache.textContent = "erro";
+                agroNewsCache.className = "rounded-full bg-red-600 px-3 py-1 text-xs font-semibold uppercase text-white";
+                agroNewsList.innerHTML = '<p class="text-sm text-slate-400">Nao foi possivel carregar noticias agora.</p>';
+                agroNewsStatus.textContent = "A fonte pode estar fora do ar ou sem resposta.";
             }
         }
 
@@ -227,7 +289,9 @@
 
         renderHistory();
         refreshVisibility();
+        refreshAgroNews();
         setInterval(refreshVisibility, 3000);
+        setInterval(refreshAgroNews, 15 * 60 * 1000);
     </script>
 </body>
 </html>
